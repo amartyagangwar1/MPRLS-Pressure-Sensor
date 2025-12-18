@@ -1,48 +1,53 @@
-/*
- * Copyright (c) 2016 Intel Corporation
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
-#include <stdio.h>
 #include <zephyr/kernel.h>
-#include <zephyr/drivers/gpio.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/sys/printk.h>
 
-/* 1000 msec = 1 sec */
-#define SLEEP_TIME_MS   1000
+static const struct i2c_dt_spec mprls = I2C_DT_SPEC_GET(DT_NODELABEL(mprls));
 
-/* The devicetree node identifier for the "led0" alias. */
-#define LED0_NODE DT_ALIAS(led0)
+int main(void){
+    if (!device_is_ready(mprls.bus)) {
+        printk("I2C bus %s is not ready!\n",mprls.bus->name);
+        return;
+    }
 
-/*
- * A build error on this line means your board is unsupported.
- * See the sample documentation for information on how to fix this.
- */
-static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+    printk("I2C ready, addr=0x%x\n", mprls.addr);
 
-int main(void)
-{
-	int ret;
-	bool led_state = true;
+    while (1) {
+        /*tell sensor to measure*/
+        uint8_t config[3] = {0xAA, 0x00, 0x00};
+        int ret = i2c_write_dt(&mprls, config, sizeof(config));
+        if(ret < 0){
+            printk("Failed to write to I2C device address %x.\n", mprls.addr);
+        } 
 
-	if (!gpio_is_ready_dt(&led)) {
-		return 0;
-	}
+        /*wait for measurement to be ready*/
+        k_msleep(5);
+        
+        /*read measurement*/
+        uint8_t data[4];    //status byte, pressure[23:16], pressure[15:8], pressure[7:0]
+        ret = i2c_read_dt(&mprls, data, sizeof(data));
+        if(ret != 0){
+            printk("Failed to read from I2C device address %x. \n", mprls.addr);
+        } 
 
-	ret = gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0) {
-		return 0;
-	}
+        /*process and print measurement*/
+        uint32_t raw = 0;
+        float pressure_psi = 0.0f; 
 
-	while (1) {
-		ret = gpio_pin_toggle_dt(&led);
-		if (ret < 0) {
-			return 0;
-		}
 
-		led_state = !led_state;
-		printf("LED state: %s\n", led_state ? "ON" : "OFF");
-		k_msleep(SLEEP_TIME_MS);
-	}
-	return 0;
+        if(!(data[0] & 0b00100000)){
+            raw = (data[1] << 16) + (data[2] << 8) + data[3];
+            pressure_psi = ((float)raw - 1677722.0f) * 25.0f / (15099494.0f - 1677722.0f);
+        }
+
+        int whole = (int)pressure_psi;
+        int frac  = (int)((pressure_psi - whole) * 100.0f);
+
+        printk("%d.%02d\n", whole,frac);
+
+        /*wait so the rate is correct (10 Hz)*/
+        k_msleep(95);
+    }
 }
