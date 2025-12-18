@@ -1,12 +1,11 @@
 sample:
-  name: Blinky Sample
+  name: MPRLS Pressure Telemetry
+
 tests:
-  sample.basic.blinky:
+  sample.mprls.pressure:
     tags:
-      - LED
-      - gpio
-    filter: dt_enabled_alias_with_parent_compat("led0", "gpio-leds")
-    depends_on: gpio
-    harness: led
+      - sensor
+      - i2c
+    depends_on: i2c
     integration_platforms:
-      - frdm_k64f
+      - nrf5340dk_nrf5340_cpuapp
